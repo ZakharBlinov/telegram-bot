@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2 class="mb-4"><i class="fas fa-tachometer-alt"></i> Дашборд</h2>
+
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted">Всего пользователей</h6>
+                        <h2 class="mb-0">{{ stats.total_users }}</h2>
+                    </div>
+                    <div class="stat-icon">
+                        <i class="fas fa-users text-primary"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted">Всего событий</h6>
+                        <h2 class="mb-0">{{ stats.total_events }}</h2>
+                    </div>
+                    <div class="stat-icon">
+                        <i class="fas fa-calendar-alt text-success"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted">На модерации</h6>
+                        <h2 class="mb-0">{{ stats.pending_events }}</h2>
+                    </div>
+                    <div class="stat-icon">
+                        <i class="fas fa-clock text-warning"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted">Событий сегодня</h6>
+                        <h2 class="mb-0">{{ stats.events_today }}</h2>
+                    </div>
+                    <div class="stat-icon">
+                        <i class="fas fa-chart-line text-info"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="table-container">
+            <h5><i class="fas fa-clock"></i> События на модерации</h5>
+            <div class="text-center text-muted py-4" id="pendingEventsInfo">
+                Загрузка...
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="table-container">
+            <h5><i class="fas fa-flag"></i> Активные жалобы</h5>
+            <div class="text-center text-muted py-4" id="complaintsInfo">
+                Загрузка...
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $.get('/events/moderation', function(data) {
+        const html = $(data);
+        const eventsCount = html.find('tbody tr').length;
+        if (eventsCount > 0) {
+            $('#pendingEventsInfo').html(`
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> ${eventsCount} событий ожидают модерации
+                </div>
+                <a href="/events/moderation" class="btn btn-primary btn-sm">Перейти к модерации</a>
+            `);
+        } else {
+            $('#pendingEventsInfo').html(`
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle"></i> Нет событий на модерации
+                </div>
+            `);
+        }
+    });
+    
+    $.get('/complaints', function(data) {
+        const html = $(data);
+        const complaintsCount = html.find('tbody tr').length;
+        if (complaintsCount > 0) {
+            $('#complaintsInfo').html(`
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle"></i> ${complaintsCount} жалоб требуют внимания
+                </div>
+                <a href="/complaints" class="btn btn-primary btn-sm">Перейти к жалобам</a>
+            `);
+        } else {
+            $('#complaintsInfo').html(`
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle"></i> Нет активных жалоб
+                </div>
+            `);
+        }
+    });
+</script>
+{% endblock %}

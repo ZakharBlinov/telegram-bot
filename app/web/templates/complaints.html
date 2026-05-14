@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2 class="mb-4"><i class="fas fa-flag"></i> Жалобы пользователей</h2>
+
+<div class="table-container">
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Тип</th>
+                    <th>ID объекта</th>
+                    <th>Причина</th>
+                    <th>От кого</th>
+                    <th>Дата</th>
+                    <th>Статус</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for complaint in complaints %}
+                <tr>
+                    <td>{{ complaint.id }}</td>
+                    <td>{{ complaint.target_type }}</td>
+                    <td>{{ complaint.target_id }}</td>
+                    <td>{{ complaint.reason[:50] }}{% if complaint.reason|length > 50 %}...{% endif %}</td>
+                    <td>{{ complaint.user_id }}</td>
+                    <td>{{ complaint.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td>
+                        {% if complaint.status == 'pending' %}
+                        <span class="badge bg-warning">На рассмотрении</span>
+                        {% elif complaint.status == 'resolved' %}
+                        <span class="badge bg-success">Решена</span>
+                        {% else %}
+                        <span class="badge bg-secondary">Отклонена</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if complaint.status == 'pending' %}
+                        <button class="btn btn-success btn-sm resolve-btn" data-id="{{ complaint.id }}">
+                            <i class="fas fa-check"></i> Принять
+                        </button>
+                        <button class="btn btn-danger btn-sm reject-complaint-btn" data-id="{{ complaint.id }}">
+                            <i class="fas fa-times"></i> Отклонить
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $('.resolve-btn').click(function() {
+        const complaintId = $(this).data('id');
+        if (confirm('Подтвердить жалобу и принять меры?')) {
+            $.post(`/api/complaints/${complaintId}/resolve`, function() {
+                location.reload();
+            }).fail(function() {
+                alert('Ошибка при обработке жалобы');
+            });
+        }
+    });
+    
+    $('.reject-complaint-btn').click(function() {
+        const complaintId = $(this).data('id');
+        if (confirm('Отклонить эту жалобу?')) {
+            $.post(`/api/complaints/${complaintId}/reject`, function() {
+                location.reload();
+            }).fail(function() {
+                alert('Ошибка при отклонении жалобы');
+            });
+        }
+    });
+</script>
+{% endblock %}

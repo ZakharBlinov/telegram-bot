@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2 class="mb-4"><i class="fas fa-chart-line"></i> Статистика</h2>
+
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats">
+            <div class="card-body">
+                <h6 class="text-muted">Всего пользователей</h6>
+                <h2 class="mb-0">{{ stats.total_users }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats">
+            <div class="card-body">
+                <h6 class="text-muted">Всего событий</h6>
+                <h2 class="mb-0">{{ stats.total_events }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats">
+            <div class="card-body">
+                <h6 class="text-muted">Всего лайков</h6>
+                <h2 class="mb-0">{{ stats.total_likes }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats">
+            <div class="card-body">
+                <h6 class="text-muted">Всего сообщений</h6>
+                <h2 class="mb-0">{{ stats.total_messages }}</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="table-container">
+            <h5><i class="fas fa-chart-pie"></i> События по статусам</h5>
+            <canvas id="eventsChart" height="200"></canvas>
+            <div class="mt-3">
+                {% for status, count in stats.events_by_status.items() %}
+                <div class="d-flex justify-content-between">
+                    <span>{{ status }}</span>
+                    <strong>{{ count }}</strong>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-4">
+        <div class="table-container">
+            <h5><i class="fas fa-users"></i> Пользователи по ролям</h5>
+            <canvas id="usersChart" height="200"></canvas>
+            <div class="mt-3">
+                {% for role, count in stats.users_by_role.items() %}
+                <div class="d-flex justify-content-between">
+                    <span>{{ role }}</span>
+                    <strong>{{ count }}</strong>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="table-container">
+            <h5><i class="fas fa-exclamation-triangle"></i> Жалобы ожидают решения</h5>
+            <h3 class="text-center text-warning">{{ stats.pending_complaints }}</h3>
+            <div class="text-center">
+                <a href="/complaints" class="btn btn-primary btn-sm">Перейти к жалобам</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const eventsCtx = document.getElementById('eventsChart').getContext('2d');
+    new Chart(eventsCtx, {
+        type: 'pie',
+        data: {
+            labels: Object.keys({{ stats.events_by_status|tojson }}),
+            datasets: [{
+                data: Object.values({{ stats.events_by_status|tojson }}),
+                backgroundColor: ['#ffc107', '#28a745', '#dc3545', '#6c757d']
+            }]
+        }
+    });
+    
+    const usersCtx = document.getElementById('usersChart').getContext('2d');
+    new Chart(usersCtx, {
+        type: 'doughnut',
+        data: {
+            labels: Object.keys({{ stats.users_by_role|tojson }}),
+            datasets: [{
+                data: Object.values({{ stats.users_by_role|tojson }}),
+                backgroundColor: ['#dc3545', '#ffc107', '#6c757d']
+            }]
+        }
+    });
+</script>
+{% endblock %}

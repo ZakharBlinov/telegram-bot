@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2 class="mb-4"><i class="fas fa-calendar-alt"></i> Модерация событий</h2>
+
+<div class="table-container">
+    {% if events %}
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Название</th>
+                    <th>Описание</th>
+                    <th>Автор</th>
+                    <th>Создано</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for event, author in events %}
+                <tr>
+                    <td>{{ event.id }}</td>
+                    <td><strong>{{ event.title }}</strong></td>
+                    <td>{{ event.description[:100] }}{% if event.description|length > 100 %}...{% endif %}</td>
+                    <td>{{ author.full_name or author.username }}</td>
+                    <td>{{ event.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td>
+                        <button class="btn btn-success btn-sm btn-modern approve-btn" data-id="{{ event.id }}">
+                            <i class="fas fa-check"></i> Одобрить
+                        </button>
+                        <button class="btn btn-danger btn-sm btn-modern reject-btn" data-id="{{ event.id }}">
+                            <i class="fas fa-times"></i> Отклонить
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-center py-5">
+        <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+        <h5>Нет событий на модерацию</h5>
+        <p class="text-muted">Все события проверены и опубликованы</p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="modal fade" id="rejectModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Отклонение события</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label">Причина отклонения:</label>
+                <textarea id="rejectReason" class="form-control" rows="3"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger" id="confirmReject">Подтвердить</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentEventId = null;
+    
+    $('.approve-btn').click(function() {
+        const eventId = $(this).data('id');
+        if (confirm('Одобрить это событие?')) {
+            $.post(`/api/events/${eventId}/approve`, function() {
+                location.reload();
+            }).fail(function() {
+                alert('Ошибка при одобрении события');
+            });
+        }
+    });
+    
+    $('.reject-btn').click(function() {
+        currentEventId = $(this).data('id');
+        $('#rejectModal').modal('show');
+    });
+    
+    $('#confirmReject').click(function() {
+        const reason = $('#rejectReason').val();
+        if (!reason) {
+            alert('Укажите причину отклонения');
+            return;
+        }
+        
+        $.post({
+            url: `/api/events/${currentEventId}/reject`,
+            data: { reason: reason },
+            success: function() {
+                location.reload();
+            },
+            error: function() {
+                alert('Ошибка при отклонении события');
+            }
+        });
+    });
+</script>
+{% endblock %}
