@@ -4,13 +4,14 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 import logging
 
 from app.service.search_service import SearchService
 from app.service.user_service import UserService
 from app.service.like_service import LikeService
 from app.service.match_service import MatchService
-from app.models import SEARCH_GOALS
+from app.models import SEARCH_GOALS, Complaint, User
 from app.keyboards.main_menu import get_main_keyboard
 
 router = Router()
@@ -20,6 +21,12 @@ class SearchStates(StatesGroup):
     viewing_profiles = State()
     editing_profile = State()
     waiting_for_photo = State()
+    waiting_for_complaint_reason = State()
+
+
+class ComplaintStates(StatesGroup):
+    waiting_for_reason = State()
+
 
 def get_search_main_keyboard(has_goal: bool = False):
     """Главная клавиатура для раздела поиска"""
@@ -31,6 +38,7 @@ def get_search_main_keyboard(has_goal: bool = False):
         keyboard.append([KeyboardButton(text="🎯 Выбрать цель")])
     keyboard.append([KeyboardButton(text="🏠 В главное меню")])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 
 def get_goal_keyboard():
     """Клавиатура выбора цели"""
@@ -46,16 +54,19 @@ def get_goal_keyboard():
         resize_keyboard=True
     )
 
+
 def get_profile_view_keyboard():
     """Клавиатура для просмотра анкет"""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="💝 Лайк"), KeyboardButton(text="👎 Пропустить")],
+            [KeyboardButton(text="⚠️ Пожаловаться")],
             [KeyboardButton(text="⏹️ Закончить просмотр")],
             [KeyboardButton(text="🏠 В главное меню")]
         ],
         resize_keyboard=True
     )
+
 
 def get_profile_edit_keyboard():
     """Клавиатура редактирования анкеты"""
@@ -67,6 +78,7 @@ def get_profile_edit_keyboard():
         ],
         resize_keyboard=True
     )
+
 
 @router.message(F.text == "🔍 Найти людей")
 async def start_search(message: Message, state: FSMContext, session: AsyncSession):
@@ -106,6 +118,7 @@ async def start_search(message: Message, state: FSMContext, session: AsyncSessio
             reply_markup=get_goal_keyboard(),
             parse_mode="HTML"
         )
+
 
 @router.message(SearchStates.choosing_goal, F.text.in_([
     "💑 Вторую половинку", 
@@ -168,6 +181,7 @@ async def choose_goal(message: Message, state: FSMContext, session: AsyncSession
             parse_mode="HTML"
         )
 
+
 @router.message(F.text == "🎯 Сменить цель")
 async def change_goal_from_main(message: Message, state: FSMContext, session: AsyncSession):
     """Сменить цель поиска из главного меню"""
@@ -180,6 +194,7 @@ async def change_goal_from_main(message: Message, state: FSMContext, session: As
         reply_markup=get_goal_keyboard(),
         parse_mode="HTML"
     )
+
 
 @router.message(F.text == "👀 Смотреть анкеты")
 async def start_viewing_profiles(message: Message, state: FSMContext, session: AsyncSession):
@@ -210,11 +225,13 @@ async def start_viewing_profiles(message: Message, state: FSMContext, session: A
     )
     
     await message.answer(
-        "🔍 <b>Начинаем просмотр анкет...</b>",
+        "🔍 <b>Начинаем просмотр анкет...</b>\n\n"
+        "⚠️ Если вы увидели нарушение правил, используйте кнопку «Пожаловаться»",
         reply_markup=get_profile_view_keyboard()
     )
     
     await show_next_profile(message, state, session)
+
 
 @router.message(F.text == "✏️ Моя анкета")
 async def show_my_profile(message: Message, state: FSMContext, session: AsyncSession):
@@ -282,6 +299,7 @@ async def show_my_profile(message: Message, state: FSMContext, session: AsyncSes
             parse_mode="HTML"
         )
 
+
 @router.message(F.text == "✏️ Изменить описание")
 async def start_edit_description(message: Message, state: FSMContext, session: AsyncSession):
     """Начать изменение описания"""
@@ -309,6 +327,7 @@ async def start_edit_description(message: Message, state: FSMContext, session: A
         ),
         parse_mode="HTML"
     )
+
 
 @router.message(F.text == "📸 Изменить фото")
 async def start_edit_photo(message: Message, state: FSMContext, session: AsyncSession):
@@ -348,6 +367,7 @@ async def start_edit_photo(message: Message, state: FSMContext, session: AsyncSe
         ),
         parse_mode="HTML"
     )
+
 
 @router.message(SearchStates.editing_profile, F.text == "❌ Отмена")
 async def cancel_editing(message: Message, state: FSMContext, session: AsyncSession):
@@ -392,6 +412,7 @@ async def cancel_editing(message: Message, state: FSMContext, session: AsyncSess
             reply_markup=get_search_main_keyboard(has_goal=False)
         )
 
+
 @router.message(SearchStates.waiting_for_photo, F.text == "❌ Отмена")
 async def cancel_photo_edit(message: Message, state: FSMContext, session: AsyncSession):
     """Отмена редактирования фото"""
@@ -434,6 +455,7 @@ async def cancel_photo_edit(message: Message, state: FSMContext, session: AsyncS
             "❌ <b>Цель поиска не найдена</b>",
             reply_markup=get_search_main_keyboard(has_goal=False)
         )
+
 
 @router.message(SearchStates.editing_profile, F.text)
 async def process_profile_description(message: Message, state: FSMContext, session: AsyncSession):
@@ -527,6 +549,7 @@ async def process_profile_description(message: Message, state: FSMContext, sessi
             reply_markup=get_search_main_keyboard(has_goal=False)
         )
 
+
 @router.message(SearchStates.waiting_for_photo, F.photo)
 async def process_profile_photo(message: Message, state: FSMContext, session: AsyncSession):
     """Обработать фото при добавлении или редактировании анкеты"""
@@ -544,7 +567,6 @@ async def process_profile_photo(message: Message, state: FSMContext, session: As
         await message.answer("❌ Цель поиска не найдена.")
         return
     
-    # Получаем существующую анкету
     existing_profile = await SearchService.get_profile_for_goal(session, message.from_user.id, goal_type)
     
     if not existing_profile:
@@ -556,7 +578,6 @@ async def process_profile_photo(message: Message, state: FSMContext, session: As
         await state.clear()
         return
     
-    # Обновляем фото через специальный метод
     profile = await SearchService.update_profile_photo(
         session=session,
         user_id=message.from_user.id,
@@ -584,6 +605,105 @@ async def process_profile_photo(message: Message, state: FSMContext, session: As
             reply_markup=get_search_main_keyboard(has_goal=True)
         )
 
+
+# ==================== ЖАЛОБЫ ====================
+
+@router.message(SearchStates.viewing_profiles, F.text == "⚠️ Пожаловаться")
+async def start_complaint(message: Message, state: FSMContext, session: AsyncSession):
+    """Начало подачи жалобы на анкету"""
+    data = await state.get_data()
+    current_profile_id = data.get('current_profile_id')
+    current_goal = data.get('current_goal')
+    
+    if not current_profile_id:
+        await message.answer("❌ Не удалось найти анкету для жалобы.")
+        return
+    
+    await state.update_data(
+        complaint_target_id=current_profile_id,
+        complaint_target_type="profile",
+        complaint_target_goal=current_goal
+    )
+    await state.set_state(ComplaintStates.waiting_for_reason)
+    
+    await message.answer(
+        "⚠️ <b>Пожаловаться на анкету</b>\n\n"
+        "Опишите причину жалобы (минимум 10 символов):\n\n"
+        "Примеры причин:\n"
+        "• Оскорбительное содержание\n"
+        "• Нецензурная лексика\n"
+        "• Спам или реклама\n"
+        "• Фейковая анкета\n"
+        "• Другая причина\n\n"
+        "Или нажмите ❌ Отмена для отмены",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="❌ Отмена")]],
+            resize_keyboard=True
+        ),
+        parse_mode="HTML"
+    )
+
+
+@router.message(ComplaintStates.waiting_for_reason, F.text == "❌ Отмена")
+async def cancel_complaint(message: Message, state: FSMContext, session: AsyncSession):
+    """Отмена подачи жалобы"""
+    await state.clear()
+    
+    await message.answer(
+        "❌ Подача жалобы отменена.",
+        reply_markup=get_profile_view_keyboard()
+    )
+    
+    current_state = await state.get_state()
+    if current_state != SearchStates.viewing_profiles:
+        await state.set_state(SearchStates.viewing_profiles)
+        data = await state.get_data()
+        if data.get('current_goal'):
+            await show_next_profile(message, state, session)
+
+
+@router.message(ComplaintStates.waiting_for_reason, F.text)
+async def process_complaint_reason(message: Message, state: FSMContext, session: AsyncSession):
+    """Обработка текста жалобы"""
+    data = await state.get_data()
+    
+    if len(message.text) < 10:
+        await message.answer("❌ Слишком короткое описание. Напишите минимум 10 символов.")
+        return
+    
+    target_id = data.get('complaint_target_id')
+    target_type = data.get('complaint_target_type')
+    
+    if not target_id or not target_type:
+        await message.answer("❌ Ошибка: цель жалобы не найдена. Попробуйте ещё раз.")
+        await state.clear()
+        return
+    
+    complaint = Complaint(
+        user_id=message.from_user.id,
+        target_type=target_type,
+        target_id=target_id,
+        reason=message.text,
+        status="pending"
+    )
+    session.add(complaint)
+    await session.commit()
+    
+    logging.info(f"Создана жалоба: user={message.from_user.id}, target_type={target_type}, target_id={target_id}")
+    
+    await message.answer(
+        "✅ <b>Жалоба отправлена!</b>\n\n"
+        "Администратор рассмотрит ваше обращение в ближайшее время.\n"
+        "Спасибо за помощь в поддержании порядка!",
+        reply_markup=get_profile_view_keyboard(),
+        parse_mode="HTML"
+    )
+    await state.clear()
+    
+    await state.set_state(SearchStates.viewing_profiles)
+    await show_next_profile(message, state, session)
+
+
 @router.message(StateFilter(SearchStates), F.text == "🏠 В главное меню")
 async def back_to_main(message: Message, state: FSMContext):
     """Вернуться в главное меню"""
@@ -593,16 +713,30 @@ async def back_to_main(message: Message, state: FSMContext):
         reply_markup=get_main_keyboard()
     )
 
+
 async def show_next_profile(message: Message, state: FSMContext, session: AsyncSession):
     """Показать следующую анкету"""
     data = await state.get_data()
     current_goal = data.get('current_goal')
     viewed_profiles = data.get('viewed_profiles', [])
     
+    if not current_goal:
+        await message.answer(
+            "❌ Цель поиска не выбрана. Нажмите «🔍 Найти людей» и выберите цель.",
+            reply_markup=get_main_keyboard()
+        )
+        return
+    
     profiles = await SearchService.find_profiles_by_goal(
         session, current_goal, message.from_user.id, limit=50
     )
     
+    # Отладка
+    print(f"[DEBUG] Найдено профилей: {len(profiles)}")
+    for p in profiles:
+        print(f"[DEBUG] Profile ID: {p.id}, User ID: {p.user_id}")
+    
+    # Фильтруем уже просмотренные
     available_profiles = [p for p in profiles if p.user_id not in viewed_profiles]
     
     if not available_profiles:
@@ -616,15 +750,23 @@ async def show_next_profile(message: Message, state: FSMContext, session: AsyncS
         return
     
     profile = available_profiles[0]
-    user = await UserService.get_user_by_telegram_id(session, profile.user_id)
+    
+    # Получаем пользователя по user_id (это внутренний ID, не telegram_id!)
+    result = await session.execute(
+        select(User).where(User.id == profile.user_id)
+    )
+    user = result.scalar_one_or_none()
     
     if not user:
+        # Если пользователь не найден, пропускаем эту анкету
+        viewed_profiles.append(profile.user_id)
+        await state.update_data(viewed_profiles=viewed_profiles)
         await show_next_profile(message, state, session)
         return
     
     viewed_profiles.append(user.id)
     await state.update_data(
-        current_profile_id=user.id,
+        current_profile_id=user.telegram_id,
         viewed_profiles=viewed_profiles,
         available_profiles=available_profiles[1:]
     )
@@ -634,7 +776,7 @@ async def show_next_profile(message: Message, state: FSMContext, session: AsyncS
         f"👤 <b>Анкета</b>\n\n"
         f"💭 <b>Цель:</b> {SEARCH_GOALS.get(current_goal, current_goal)}\n\n"
         f"👤 <b>Имя:</b> {user.full_name}\n"
-        f"🎂 <b>Возраст:</b> {user.age} лет\n"
+        f"🎂 <b>Возраст:</b> {user.age if user.age else 'не указан'} лет\n"
         f"👫 <b>Пол:</b> {gender_text}\n"
     )
     
@@ -657,6 +799,7 @@ async def show_next_profile(message: Message, state: FSMContext, session: AsyncS
             reply_markup=get_profile_view_keyboard(),
             parse_mode="HTML"
         )
+
 
 @router.message(SearchStates.viewing_profiles, F.text == "💝 Лайк")
 async def like_profile(message: Message, state: FSMContext, session: AsyncSession):
@@ -705,6 +848,7 @@ async def like_profile(message: Message, state: FSMContext, session: AsyncSessio
     
     await show_next_profile(message, state, session)
 
+
 @router.message(SearchStates.viewing_profiles, F.text == "💌 Написать сообщение")
 async def start_chat_after_match(message: Message, state: FSMContext, session: AsyncSession):
     """Начать чат после взаимного лайка"""
@@ -721,11 +865,13 @@ async def start_chat_after_match(message: Message, state: FSMContext, session: A
     
     await show_next_profile(message, state, session)
 
+
 @router.message(SearchStates.viewing_profiles, F.text == "👎 Пропустить")
 @router.message(SearchStates.viewing_profiles, F.text == "🔍 Продолжить просмотр")
 async def skip_profile(message: Message, state: FSMContext, session: AsyncSession):
     """Пропустить анкету"""
     await show_next_profile(message, state, session)
+
 
 @router.message(SearchStates.viewing_profiles, F.text == "⏹️ Закончить просмотр")
 async def stop_viewing_profiles(message: Message, state: FSMContext, session: AsyncSession):

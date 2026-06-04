@@ -54,7 +54,6 @@ class SearchService:
     ) -> UserProfileByGoal:
         """Создать анкету с автоматической модерацией"""
         try:
-            # Проверяем контент
             check_result = await ModerationService.check_profile_content(description)
             action = check_result["action"]
             
@@ -70,7 +69,6 @@ class SearchService:
                 moderation_reason = check_result["reason"]
                 logging.info(f"Анкета отправлена на МОДЕРАЦИЮ: user={user_id}, причина={moderation_reason}")
                 
-                # Уведомляем админов
                 result = await session.execute(
                     select(User).where(User.role.in_(["admin", "moderator"]))
                 )
@@ -88,7 +86,6 @@ class SearchService:
                 moderation_reason = None
                 logging.info(f"Анкета ОПУБЛИКОВАНА: user={user_id}")
             
-            # Создаём анкету
             profile = UserProfileByGoal(
                 user_id=user_id,
                 goal_type=goal_type,
@@ -105,7 +102,6 @@ class SearchService:
             await session.commit()
             await session.refresh(profile)
             
-            # Уведомляем пользователя
             if moderation_status == "rejected":
                 await NotificationService.create_notification(
                     session, user_id, "system",
@@ -201,14 +197,25 @@ class SearchService:
     
     @staticmethod
     async def get_profile_for_goal(session: AsyncSession, user_id: int, goal_type: str):
-        """Получить анкету (только опубликованные)"""
+        """Получить анкету пользователя для конкретной цели (только опубликованные)"""
         result = await session.execute(
             select(UserProfileByGoal).where(and_(
                 UserProfileByGoal.user_id == user_id,
                 UserProfileByGoal.goal_type == goal_type,
                 UserProfileByGoal.moderation_status == "published",
                 UserProfileByGoal.is_active == True
-            ))
+            )).limit(1)
+        )
+        return result.scalar_one_or_none()
+    
+    @staticmethod
+    async def get_profile_for_goal_any_status(session: AsyncSession, user_id: int, goal_type: str):
+        """Получить анкету пользователя для конкретной цели (любой статус)"""
+        result = await session.execute(
+            select(UserProfileByGoal).where(and_(
+                UserProfileByGoal.user_id == user_id,
+                UserProfileByGoal.goal_type == goal_type
+            )).limit(1)
         )
         return result.scalar_one_or_none()
     
@@ -232,7 +239,7 @@ class SearchService:
                 UserProfileByGoal.goal_type == goal_type,
                 UserProfileByGoal.moderation_status == "published",
                 UserProfileByGoal.is_active == True,
-                UserProfileByGoal.user_id != exclude_user_id,
+                User.telegram_id != exclude_user_id,
                 User.profile_completed == True
             ))
             .order_by(UserProfileByGoal.created_at.desc())
