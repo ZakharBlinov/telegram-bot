@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2 class="mb-4"><i class="fas fa-flag"></i> Жалобы пользователей</h2>
+<h2 class="mb-4"><i class="fas fa-flag"></i> Обработка жалоб</h2>
 
 <div class="table-container">
     <div class="table-responsive">
@@ -12,7 +12,7 @@
                     <th>Тип</th>
                     <th>ID объекта</th>
                     <th>Причина</th>
-                    <th>От кого</th>
+                    <th>От пользователя</th>
                     <th>Дата</th>
                     <th>Статус</th>
                     <th>Действия</th>
@@ -24,26 +24,28 @@
                     <td>{{ complaint.id }}</td>
                     <td>{{ complaint.target_type }}</td>
                     <td>{{ complaint.target_id }}</td>
-                    <td>{{ complaint.reason[:50] }}{% if complaint.reason|length > 50 %}...{% endif %}</td>
+                    <td>{{ complaint.reason[:100] if complaint.reason else '-' }}</td>
                     <td>{{ complaint.user_id }}</td>
-                    <td>{{ complaint.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td>{{ complaint.created_at.strftime('%d.%m.%Y %H:%M') if complaint.created_at else '-' }}</td>
                     <td>
                         {% if complaint.status == 'pending' %}
-                        <span class="badge bg-warning">На рассмотрении</span>
+                        <span class="badge bg-warning text-dark">⏳ На рассмотрении</span>
                         {% elif complaint.status == 'resolved' %}
-                        <span class="badge bg-success">Решена</span>
+                        <span class="badge bg-success">✅ Решена</span>
                         {% else %}
-                        <span class="badge bg-secondary">Отклонена</span>
+                        <span class="badge bg-secondary">❌ Отклонена</span>
                         {% endif %}
                     </td>
                     <td>
                         {% if complaint.status == 'pending' %}
-                        <button class="btn btn-success btn-sm resolve-btn" data-id="{{ complaint.id }}">
+                        <button class="btn btn-success btn-sm approve-complaint" data-id="{{ complaint.id }}">
                             <i class="fas fa-check"></i> Принять
                         </button>
-                        <button class="btn btn-danger btn-sm reject-complaint-btn" data-id="{{ complaint.id }}">
+                        <button class="btn btn-danger btn-sm reject-complaint" data-id="{{ complaint.id }}">
                             <i class="fas fa-times"></i> Отклонить
                         </button>
+                        {% else %}
+                        <span class="text-muted">Обработано</span>
                         {% endif %}
                     </td>
                 </tr>
@@ -52,30 +54,46 @@
         </table>
     </div>
 </div>
+
+<a href="/dashboard" class="back-link">← Назад к дашборду</a>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    $('.resolve-btn').click(function() {
-        const complaintId = $(this).data('id');
-        if (confirm('Подтвердить жалобу и принять меры?')) {
-            $.post(`/api/complaints/${complaintId}/resolve`, function() {
-                location.reload();
-            }).fail(function() {
-                alert('Ошибка при обработке жалобы');
-            });
-        }
-    });
-    
-    $('.reject-complaint-btn').click(function() {
-        const complaintId = $(this).data('id');
-        if (confirm('Отклонить эту жалобу?')) {
-            $.post(`/api/complaints/${complaintId}/reject`, function() {
-                location.reload();
-            }).fail(function() {
-                alert('Ошибка при отклонении жалобы');
-            });
-        }
+    $(document).ready(function() {
+        // Обработка принятия жалобы
+        $('.approve-complaint').click(function() {
+            const complaintId = $(this).data('id');
+            if (confirm('Принять жалобу? Это означает, что вы согласны с нарушением.')) {
+                $.ajax({
+                    url: '/api/complaints/' + complaintId + '/resolve',
+                    method: 'POST',
+                    success: function(response) {
+                        location.reload();
+                    },
+                    error: function(xhr) {
+                        alert('Ошибка при принятии жалобы: ' + xhr.responseText);
+                    }
+                });
+            }
+        });
+
+        // Обработка отклонения жалобы
+        $('.reject-complaint').click(function() {
+            const complaintId = $(this).data('id');
+            if (confirm('Отклонить жалобу?')) {
+                $.ajax({
+                    url: '/api/complaints/' + complaintId + '/reject',
+                    method: 'POST',
+                    success: function(response) {
+                        location.reload();
+                    },
+                    error: function(xhr) {
+                        alert('Ошибка при отклонении жалобы: ' + xhr.responseText);
+                    }
+                });
+            }
+        });
     });
 </script>
 {% endblock %}

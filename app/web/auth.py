@@ -76,14 +76,13 @@ async def get_current_admin(
         )
     return user
 
-async def get_current_super_admin(
-    request: Request,
-    session: AsyncSession = Depends()
-) -> User:
+async def get_current_super_admin(request: Request, session: AsyncSession):
     user = await get_current_user(request, session)
-    if user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin permissions required"
-        )
+    
+    # Супер-админ — это пользователь с ADMIN_ID из .env
+    from app.config import Config
+    config = Config()
+    
+    if user.telegram_id != config.ADMIN_ID:
+        raise HTTPException(status_code=403, detail="Только создатель может управлять администраторами")
     return user

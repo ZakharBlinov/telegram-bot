@@ -10,8 +10,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from app.database import get_session
 from app.models import User, Event, UserProfileByGoal, Complaint
+from app.config import Config
 
 app = FastAPI(title="SpotChat Admin Panel")
+config = Config()
+
+# ID супер-администратора (только он может назначать админов)
+SUPER_ADMIN_ID = config.ADMIN_ID
 
 @app.get("/", response_class=HTMLResponse)
 async def login_page():
@@ -100,6 +105,33 @@ async def login(username: str = Form(...), password: str = Form(...)):
         response.set_cookie(key="admin_logged_in", value="true")
         return response
     raise HTTPException(status_code=401, detail="Invalid credentials")
+
+async def get_current_user(request: Request, session: AsyncSession):
+    """Получить текущего пользователя из cookies"""
+    if request.cookies.get("admin_logged_in") != "true":
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    result = await session.execute(select(User).where(User.telegram_id == SUPER_ADMIN_ID))
+    user = result.scalar_one_or_none()
+    if not user:
+        user = User(
+            telegram_id=SUPER_ADMIN_ID,
+            username="admin",
+            full_name="Administrator",
+            role="admin",
+            profile_completed=True
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+    return user
+
+async def is_super_admin(request: Request, session: AsyncSession) -> bool:
+    """Проверка, является ли текущий пользователь супер-админом"""
+    try:
+        user = await get_current_user(request, session)
+        return user.telegram_id == SUPER_ADMIN_ID
+    except:
+        return False
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, session: AsyncSession = Depends(get_session)):
@@ -429,8 +461,12 @@ async def users_list(request: Request, session: AsyncSession = Depends(get_sessi
     if request.cookies.get("admin_logged_in") != "true":
         return RedirectResponse(url="/")
     
+    is_super = await is_super_admin(request, session)
+    
     result = await session.execute(select(User).order_by(User.created_at.desc()))
     users = result.scalars().all()
+    
+    current_user = await get_current_user(request, session)
     
     html = """
     <!DOCTYPE html>
@@ -447,6 +483,11 @@ async def users_list(request: Request, session: AsyncSession = Depends(get_sessi
             th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
             th { background: #667eea; color: white; }
             .back-link { display: inline-block; margin-top: 20px; color: #667eea; text-decoration: none; }
+            .role-select { padding: 4px 8px; border-radius: 5px; border: 1px solid #ddd; }
+            .badge-super { background: #9b59b6; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+            .badge-admin { background: #dc3545; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+            .badge-moderator { background: #ffc107; color: #000; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+            .badge-user { background: #6c757d; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
         </style>
     </head>
     <body>
@@ -455,6 +496,14 @@ async def users_list(request: Request, session: AsyncSession = Depends(get_sessi
             <a href="/logout" class="logout">Выйти</a>
         </div>
         <div class="container">
+    """
+    
+    if is_super:
+        html += '<p style="color: #9b59b6; margin-bottom: 10px;">👑 Вы супер-администратор — можете управлять ролями</p>'
+    else:
+        html += '<p style="color: #6c757d; margin-bottom: 10px;">ℹ️ Только супер-администратор может изменять роли</p>'
+    
+    html += """
             <table>
                 <thead>
                     <tr>
@@ -464,20 +513,52 @@ async def users_list(request: Request, session: AsyncSession = Depends(get_sessi
                         <th>Username</th>
                         <th>Роль</th>
                         <th>Регистрация</th>
+                        <th>Действия</th>
                     </tr>
                 </thead>
                 <tbody>
     """
     
     for user in users:
+        is_super_user = (user.telegram_id == SUPER_ADMIN_ID)
+        
+        if is_super_user:
+            role_badge = '<span class="badge-super">👑 Супер-администратор</span>'
+        elif user.role == "admin":
+            role_badge = '<span class="badge-admin">👑 Администратор</span>'
+        elif user.role == "moderator":
+            role_badge = '<span class="badge-moderator">🛡️ Модератор</span>'
+        else:
+            role_badge = '<span class="badge-user">👤 Пользователь</span>'
+        
         html += f"""
             <tr>
                 <td>{user.id}</td>
                 <td>{user.telegram_id}</td>
                 <td>{user.full_name or '-'}</td>
                 <td>{user.username or '-'}</td>
-                <td>{user.role or 'user'}</td>
+                <td>{role_badge}</td>
                 <td>{user.created_at.strftime('%d.%m.%Y') if user.created_at else '-'}</td>
+                <td>
+        """
+        
+        if is_super and user.id != current_user.id:
+            html += f"""
+                <form method="post" action="/api/users/{user.id}/role" style="display:inline;">
+                    <select name="role" class="role-select" onchange="this.form.submit()">
+                        <option value="user" {'selected' if user.role == 'user' else ''}>👤 Пользователь</option>
+                        <option value="moderator" {'selected' if user.role == 'moderator' else ''}>🛡️ Модератор</option>
+                        <option value="admin" {'selected' if user.role == 'admin' else ''}>👑 Администратор</option>
+                    </select>
+                </form>
+            """
+        elif user.id == current_user.id:
+            html += '<span style="color:#6c757d; font-size:12px;">Это вы</span>'
+        else:
+            html += '<span style="color:#6c757d; font-size:12px;">Доступ запрещён</span>'
+        
+        html += f"""
+                </td>
             </tr>
         """
     
@@ -492,29 +573,78 @@ async def users_list(request: Request, session: AsyncSession = Depends(get_sessi
     
     return HTMLResponse(html)
 
+@app.post("/api/users/{user_id}/role")
+async def update_user_role(
+    user_id: int,
+    role: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+    request: Request = None
+):
+    if not await is_super_admin(request, session):
+        raise HTTPException(status_code=403, detail="Только супер-администратор может изменять роли")
+    
+    result = await session.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    
+    current_user = await get_current_user(request, session)
+    if user.id == current_user.id:
+        raise HTTPException(status_code=403, detail="Нельзя изменить свою роль")
+    
+    if role in ["user", "moderator", "admin"]:
+        user.role = role
+        await session.commit()
+    
+    # Возвращаем пользователя обратно на страницу пользователей
+    return RedirectResponse(url="/users", status_code=303)
+
 @app.get("/complaints", response_class=HTMLResponse)
 async def complaints_list(request: Request, session: AsyncSession = Depends(get_session)):
     if request.cookies.get("admin_logged_in") != "true":
         return RedirectResponse(url="/")
     
-    result = await session.execute(select(Complaint).order_by(Complaint.created_at.desc()))
+    filter_status = request.query_params.get("status", "pending")
+    
+    query = select(Complaint)
+    if filter_status != "all":
+        query = query.where(Complaint.status == filter_status)
+    query = query.order_by(Complaint.created_at.desc())
+    
+    result = await session.execute(query)
     complaints = result.scalars().all()
     
-    html = """
+    pending_count = await session.execute(
+        select(func.count(Complaint.id)).where(Complaint.status == "pending")
+    )
+    pending_count = pending_count.scalar() or 0
+    
+    html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <title>Жалобы</title>
+        <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
         <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: Arial, sans-serif; margin: 0; background: #f5f5f5; }
-            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
-            .header a.logout { background: #dc3545; padding: 8px 16px; border-radius: 10px; color: white; text-decoration: none; }
-            .container { padding: 20px; max-width: 1200px; margin: 0 auto; }
-            table { width: 100%; background: white; border-radius: 10px; border-collapse: collapse; }
-            th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-            th { background: #667eea; color: white; }
-            .back-link { display: inline-block; margin-top: 20px; color: #667eea; text-decoration: none; }
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{ font-family: Arial, sans-serif; margin: 0; background: #f5f5f5; }}
+            .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center; }}
+            .header a.logout {{ background: #dc3545; padding: 8px 16px; border-radius: 10px; color: white; text-decoration: none; }}
+            .container {{ padding: 20px; max-width: 1200px; margin: 0 auto; }}
+            table {{ width: 100%; background: white; border-radius: 10px; border-collapse: collapse; }}
+            th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
+            th {{ background: #667eea; color: white; }}
+            .btn {{ padding: 5px 10px; border: none; border-radius: 5px; cursor: pointer; margin: 2px; }}
+            .btn-success {{ background: #28a745; color: white; }}
+            .btn-danger {{ background: #dc3545; color: white; }}
+            .btn-secondary {{ background: #6c757d; color: white; }}
+            .btn-sm {{ padding: 3px 8px; font-size: 12px; }}
+            .back-link {{ display: inline-block; margin-top: 20px; color: #667eea; text-decoration: none; }}
+            .tabs {{ display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }}
+            .tabs a {{ padding: 8px 16px; background: #e9ecef; border-radius: 5px; text-decoration: none; color: #333; }}
+            .tabs a.active {{ background: #667eea; color: white; }}
+            .badge {{ background: #dc3545; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px; }}
         </style>
     </head>
     <body>
@@ -523,6 +653,14 @@ async def complaints_list(request: Request, session: AsyncSession = Depends(get_
             <a href="/logout" class="logout">Выйти</a>
         </div>
         <div class="container">
+            <div class="tabs">
+                <a href="/complaints?status=pending" class="{'active' if filter_status == 'pending' else ''}">
+                    ⏳ Активные <span class="badge">{pending_count}</span>
+                </a>
+                <a href="/complaints?status=all" class="{'active' if filter_status == 'all' else ''}">📋 Все</a>
+                <a href="/complaints?status=resolved" class="{'active' if filter_status == 'resolved' else ''}">✅ Решённые</a>
+                <a href="/complaints?status=rejected" class="{'active' if filter_status == 'rejected' else ''}">❌ Отклонённые</a>
+            </div>
             <table>
                 <thead>
                     <tr>
@@ -533,30 +671,82 @@ async def complaints_list(request: Request, session: AsyncSession = Depends(get_
                         <th>От пользователя</th>
                         <th>Дата</th>
                         <th>Статус</th>
+                        <th>Действия</th>
                     </tr>
                 </thead>
                 <tbody>
     """
     
-    for complaint in complaints:
-        status_text = {"pending": "⏳ На рассмотрении", "resolved": "✅ Решена", "rejected": "❌ Отклонена"}.get(complaint.status, complaint.status)
-        html += f"""
-            <tr>
-                <td>{complaint.id}</td>
-                <td>{complaint.target_type}</td>
-                <td>{complaint.target_id}</td>
-                <td>{complaint.reason[:100] if complaint.reason else '-'}</td>
-                <td>{complaint.user_id}</td>
-                <td>{complaint.created_at.strftime('%d.%m.%Y %H:%M') if complaint.created_at else '-'}</td>
-                <td>{status_text}</td>
-            </tr>
-        """
+    if not complaints:
+        html += '<tr><td colspan="8" style="text-align:center; padding:20px;">Нет жалоб</td></tr>'
+    else:
+        for complaint in complaints:
+            status_text = {"pending": "⏳ На рассмотрении", "resolved": "✅ Решена", "rejected": "❌ Отклонена"}.get(complaint.status, complaint.status)
+            html += f"""
+                <tr>
+                    <td>{complaint.id}</td>
+                    <td>{complaint.target_type}</td>
+                    <td>{complaint.target_id}</td>
+                    <td>{complaint.reason[:100] if complaint.reason else '-'}</td>
+                    <td>{complaint.user_id}</td>
+                    <td>{complaint.created_at.strftime('%d.%m.%Y %H:%M') if complaint.created_at else '-'}</td>
+                    <td>{status_text}</td>
+                    <td>
+            """
+            if complaint.status == "pending":
+                html += f"""
+                        <button class="btn btn-success btn-sm" onclick="resolveComplaint({complaint.id})">✅ Принять</button>
+                        <button class="btn btn-danger btn-sm" onclick="rejectComplaint({complaint.id})">❌ Отклонить</button>
+                """
+            else:
+                html += '<span class="btn btn-secondary btn-sm" style="cursor:default;">✅ Обработано</span>'
+            html += f"""
+                    </td>
+                </tr>
+            """
     
     html += """
                 </tbody>
             </table>
             <a href="/dashboard" class="back-link">← Назад к дашборду</a>
         </div>
+        <script>
+            function resolveComplaint(id) {
+                if(confirm('Принять жалобу?')) {
+                    fetch('/api/complaints/' + id + '/resolve', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'}
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if(data.status === 'success') {
+                            location.reload();
+                        } else {
+                            alert('Ошибка: ' + data.message);
+                        }
+                    })
+                    .catch(error => alert('Ошибка: ' + error));
+                }
+            }
+            
+            function rejectComplaint(id) {
+                if(confirm('Отклонить жалобу?')) {
+                    fetch('/api/complaints/' + id + '/reject', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'}
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if(data.status === 'success') {
+                            location.reload();
+                        } else {
+                            alert('Ошибка: ' + data.message);
+                        }
+                    })
+                    .catch(error => alert('Ошибка: ' + error));
+                }
+            }
+        </script>
     </body>
     </html>
     """
@@ -654,6 +844,24 @@ async def reject_profile(profile_id: int, reason: str = Form(...), session: Asyn
         profile.moderation_status = "rejected"
         profile.is_active = False
         profile.moderation_reason = reason
+        await session.commit()
+    return {"status": "success"}
+
+@app.post("/api/complaints/{complaint_id}/resolve")
+async def resolve_complaint(complaint_id: int, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Complaint).where(Complaint.id == complaint_id))
+    complaint = result.scalar_one_or_none()
+    if complaint:
+        complaint.status = "resolved"
+        await session.commit()
+    return {"status": "success"}
+
+@app.post("/api/complaints/{complaint_id}/reject")
+async def reject_complaint(complaint_id: int, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Complaint).where(Complaint.id == complaint_id))
+    complaint = result.scalar_one_or_none()
+    if complaint:
+        complaint.status = "rejected"
         await session.commit()
     return {"status": "success"}
 
