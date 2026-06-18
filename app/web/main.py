@@ -99,30 +99,50 @@ async def login_page():
     """
 
 @app.post("/api/login")
-async def login(username: str = Form(...), password: str = Form(...)):
-    if username == "admin" and password == "admin123":
-        response = RedirectResponse(url="/dashboard", status_code=303)
-        response.set_cookie(key="admin_logged_in", value="true")
-        return response
-    raise HTTPException(status_code=401, detail="Invalid credentials")
+async def login(
+    username: str = Form(...), 
+    password: str = Form(...),
+    session: AsyncSession = Depends(get_session)
+):
+    # Ищем пользователя по username
+    result = await session.execute(
+        select(User).where(User.username == username)
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    # Проверяем пароль (все пароли admin123)
+    if password != "admin123":
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    # Проверяем роль (только admin и moderator имеют доступ к админ-панели)
+    if user.role not in ["admin", "moderator"]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    response = RedirectResponse(url="/dashboard", status_code=303)
+    response.set_cookie(key="admin_logged_in", value="true")
+    response.set_cookie(key="user_telegram_id", value=str(user.telegram_id))
+    response.set_cookie(key="user_role", value=user.role)
+    
+    return response
 
 async def get_current_user(request: Request, session: AsyncSession):
     """Получить текущего пользователя из cookies"""
     if request.cookies.get("admin_logged_in") != "true":
         raise HTTPException(status_code=401, detail="Not authenticated")
-    result = await session.execute(select(User).where(User.telegram_id == SUPER_ADMIN_ID))
+    
+    telegram_id = request.cookies.get("user_telegram_id")
+    if not telegram_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    result = await session.execute(
+        select(User).where(User.telegram_id == int(telegram_id))
+    )
     user = result.scalar_one_or_none()
     if not user:
-        user = User(
-            telegram_id=SUPER_ADMIN_ID,
-            username="admin",
-            full_name="Administrator",
-            role="admin",
-            profile_completed=True
-        )
-        session.add(user)
-        await session.commit()
-        await session.refresh(user)
+        raise HTTPException(status_code=401, detail="User not found")
     return user
 
 async def is_super_admin(request: Request, session: AsyncSession) -> bool:
@@ -597,7 +617,6 @@ async def update_user_role(
         user.role = role
         await session.commit()
     
-    # Возвращаем пользователя обратно на страницу пользователей
     return RedirectResponse(url="/users", status_code=303)
 
 @app.get("/complaints", response_class=HTMLResponse)
@@ -869,4 +888,6 @@ async def reject_complaint(complaint_id: int, session: AsyncSession = Depends(ge
 async def logout():
     response = RedirectResponse(url="/", status_code=303)
     response.delete_cookie("admin_logged_in")
+    response.delete_cookie("user_telegram_id")
+    response.delete_cookie("user_role")
     return response
